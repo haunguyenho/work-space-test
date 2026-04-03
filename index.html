@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AGENT.WORKS — Pixel Office</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #1a1a2e; --floor: #2d2d4e; --floor-alt: #252545;
+    --wall: #16213e; --wall-top: #0f3460;
+    --desk: #4a3728; --desk-light: #6b5040;
+    --carpet-research: #2a3a5c; --carpet-data: #2a4a3a;
+    --carpet-support: #4a2a3a; --carpet-ops: #3a3a2a;
+    --accent: #e94560; --green: #0f9b58; --blue: #4cc9f0;
+    --yellow: #ffd60a; --text: #f0e6d3; --tile: 48px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; image-rendering:pixelated; }
+  body {
+    font-family:'Press Start 2P',monospace; background:var(--bg); color:var(--text);
+    overflow:hidden; height:100vh; width:100vw;
+  }
+  #topbar {
+    position:fixed; top:0; left:0; right:0; z-index:100;
+    background:var(--wall); border-bottom:4px solid var(--accent);
+    padding:8px 16px; display:flex; align-items:center; gap:16px; height:52px;
+  }
+  .logo { font-size:9px; color:var(--accent); flex:1; }
+  .logo span { color:var(--text); }
+  .stat-pill { background:rgba(0,0,0,0.3); border:2px solid var(--blue); padding:4px 10px; font-size:6px; color:var(--blue); white-space:nowrap; }
+  .stat-pill.green { border-color:var(--green); color:var(--green); }
+  .stat-pill.yellow { border-color:var(--yellow); color:var(--yellow); }
+  #mapwrap { position:fixed; top:52px; left:0; right:0; bottom:22px; overflow:hidden; }
+  #map { position:relative; width:1152px; height:864px; transform-origin:top left; }
+  .floor-grid {
+    position:absolute; inset:0;
+    background-image: linear-gradient(var(--wall) 1px,transparent 1px), linear-gradient(90deg,var(--wall) 1px,transparent 1px);
+    background-size:var(--tile) var(--tile); opacity:0.15; pointer-events:none;
+  }
+  .room { position:absolute; border:4px solid var(--wall-top); padding:8px; }
+  .room-label { font-size:5px; background:var(--wall-top); color:var(--text); padding:3px 6px; border-bottom:2px solid var(--accent); white-space:nowrap; }
+  .room-research { background:var(--carpet-research); left:32px; top:32px; width:480px; height:320px; }
+  .room-data     { background:var(--carpet-data);     left:576px; top:32px; width:544px; height:320px; }
+  .room-support  { background:var(--carpet-support);  left:32px; top:416px; width:480px; height:320px; }
+  .room-ops      { background:var(--carpet-ops);      left:576px; top:416px; width:544px; height:320px; }
+  .desk {
+    position:absolute; width:80px; height:56px;
+    background:var(--desk); border-top:4px solid var(--desk-light);
+    border-right:4px solid #2a1a10; border-bottom:4px solid #2a1a10;
+    border-left:4px solid var(--desk-light); z-index:10;
+  }
+  .desk::after {
+    content:''; position:absolute; top:6px; left:8px; right:8px; bottom:6px;
+    background:#1a0f0a; border:2px solid #0d0a08;
+  }
+  .desk.on::after { box-shadow:0 0 10px rgba(100,200,255,0.6); background:#001420; }
+  .agent-wrap {
+    position:absolute; z-index:20; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center;
+    transform:translateX(-50%); transition:none;
+  }
+  .agent-wrap:hover .agent-sprite { filter:brightness(1.3); }
+  .nametag {
+    font-size:4px; background:rgba(0,0,0,0.85); color:var(--text);
+    border:2px solid var(--blue); padding:2px 6px; white-space:nowrap;
+    margin-bottom:2px; position:relative;
+  }
+  .nametag::after {
+    content:''; position:absolute; bottom:-5px; left:50%; transform:translateX(-50%);
+    border:3px solid transparent; border-top-color:var(--blue);
+  }
+  .status-dot { width:6px; height:6px; position:absolute; top:-2px; right:-2px; }
+  .dot-idle    { background:#666; }
+  .dot-thinking { background:var(--blue); animation:blink 1s infinite; }
+  .dot-working  { background:var(--yellow); animation:blink 0.5s infinite; }
+  .dot-done     { background:var(--green); }
+  .dot-busy     { background:var(--accent); animation:blink 0.3s infinite; }
+  .bubble {
+    position:absolute; top:-32px; left:50%; transform:translateX(-50%);
+    background:rgba(0,0,0,0.9); border:2px solid var(--blue);
+    padding:3px 6px; font-size:5px; white-space:nowrap;
+    color:var(--blue); pointer-events:none; z-index:30;
+  }
+  .bubble.thinking { border-color:var(--blue); color:var(--blue); }
+  .bubble.working  { border-color:var(--yellow); color:var(--yellow); }
+  .bubble.done     { border-color:var(--green); color:var(--green); }
+  .bubble.busy     { border-color:var(--accent); color:var(--accent); }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+  @keyframes bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+  @keyframes float-up { 0%{transform:translateY(0);opacity:1} 100%{transform:translateY(-60px);opacity:0} }
+  @keyframes glow { 0%,100%{box-shadow:0 0 4px var(--yellow)} 50%{box-shadow:0 0 16px var(--yellow)} }
+  @keyframes walkbob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)} }
+  @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+  .gear { display:inline-block; animation:spin 2s linear infinite; }
+  .think-dot { display:inline-block; animation:blink 1.2s infinite; }
+  .think-dot:nth-child(2){animation-delay:0.4s}
+  .think-dot:nth-child(3){animation-delay:0.8s}
+  .float-emoji { position:absolute; font-size:20px; pointer-events:none; animation:float-up 2s ease-out forwards; z-index:50; }
+  .plant { position:absolute; font-size:24px; z-index:5; }
+  .deco  { position:absolute; font-size:16px; z-index:5; }
+  #ticker { position:fixed; bottom:0; left:0; right:0; z-index:100; background:var(--wall); border-top:2px solid var(--accent); padding:4px 0; overflow:hidden; height:22px; }
+  #ticker-inner { display:flex; gap:48px; white-space:nowrap; animation:ticker-scroll 30s linear infinite; font-size:5px; color:var(--blue); }
+  @keyframes ticker-scroll { from{transform:translateX(100vw)} to{transform:translateX(-200%)} }
+  #legend { position:fixed; bottom:30px; left:16px; z-index:100; background:rgba(0,0,0,0.8); border:2px solid var(--wall-top); padding:8px 10px; }
+  .leg-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; font-size:4px; }
+  .leg-dot { width:8px; height:8px; flex-shrink:0; }
+  #controls-hint { position:fixed; bottom:30px; right:16px; z-index:100; background:rgba(0,0,0,0.85); border:2px solid var(--accent); padding:10px 12px; font-size:5px; line-height:2.2; color:var(--text); }
+  #controls-hint .key { display:inline-block; background:var(--wall-top); border:2px solid var(--blue); padding:1px 5px; color:var(--blue); margin:0 2px; }
+  ::-webkit-scrollbar{width:8px} ::-webkit-scrollbar-track{background:var(--wall)} ::-webkit-scrollbar-thumb{background:var(--accent)}
+
+  /* ── PLAYER CHARACTER SPECIAL STYLES ── */
+  #player-wrap {
+    position:absolute; z-index:40;
+    display:flex; flex-direction:column; align-items:center;
+    transform:translateX(-50%);
+    transition:left 0.12s linear, top 0.12s linear;
+    pointer-events:none;
+  }
+  .player-nametag {
+    font-size:4px; background:rgba(233,69,96,0.95); color:white;
+    border:2px solid #fff; padding:2px 6px; white-space:nowrap;
+    margin-bottom:2px; position:relative;
+  }
+  .player-nametag::after {
+    content:''; position:absolute; bottom:-5px; left:50%; transform:translateX(-50%);
+    border:3px solid transparent; border-top-color:#fff;
+  }
+  .player-you-badge {
+    font-size:3px; background:var(--accent); color:white; padding:1px 4px;
+    position:absolute; top:-10px; left:50%; transform:translateX(-50%);
+    white-space:nowrap; border:1px solid #fff;
+  }
+  #player-wrap.walking .player-sprite { animation:walkbob 0.25s ease-in-out infinite; }
+  #player-wrap.walking-left .player-sprite { transform:scaleX(-1); }
+
+  /* ── CHARACTER CREATOR OVERLAY ── */
+  #creator-overlay {
+    position:fixed; inset:0; z-index:300;
+    background:rgba(0,0,0,0.92);
+    display:flex; align-items:center; justify-content:center;
+  }
+  #creator-box {
+    background:var(--bg); border:4px solid var(--accent);
+    width:480px; padding:0;
+    box-shadow:8px 8px 0 var(--accent), 16px 16px 0 rgba(233,69,96,0.3);
+  }
+  .creator-header {
+    background:var(--accent); padding:16px 20px;
+    font-size:10px; color:white; text-align:center; letter-spacing:2px;
+    border-bottom:4px solid #8b1a28;
+  }
+  .creator-subtitle { font-size:5px; color:rgba(255,255,255,0.7); margin-top:6px; letter-spacing:1px; }
+  .creator-body { padding:20px; }
+  .creator-section { margin-bottom:20px; }
+  .creator-label { font-size:6px; color:var(--accent); margin-bottom:10px; display:block; }
+  .creator-input {
+    width:100%; background:var(--wall); border:2px solid var(--blue); color:var(--text);
+    font-family:'Press Start 2P',monospace; font-size:7px; padding:10px 12px;
+    outline:none; letter-spacing:1px;
+  }
+  .creator-input:focus { border-color:var(--accent); }
+  .option-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .opt-btn {
+    background:var(--wall); border:2px solid #444; color:var(--text);
+    font-family:'Press Start 2P',monospace; font-size:5px; padding:10px 8px;
+    cursor:pointer; text-align:center; line-height:2; transition:all 0.1s;
+  }
+  .opt-btn:hover { border-color:var(--blue); color:var(--blue); }
+  .opt-btn.selected { border-color:var(--accent); background:rgba(233,69,96,0.2); color:var(--accent); }
+  .color-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; }
+  .color-swatch {
+    width:36px; height:36px; border:3px solid transparent; cursor:pointer;
+    transition:all 0.1s;
+  }
+  .color-swatch:hover { transform:scale(1.15); }
+  .color-swatch.selected { border-color:white; transform:scale(1.15); box-shadow:0 0 8px rgba(255,255,255,0.5); }
+  #preview-area {
+    display:flex; align-items:center; justify-content:center;
+    gap:24px; background:var(--wall); padding:16px; margin-top:4px;
+    border:2px solid #333;
+  }
+  #preview-char { transform:scale(3); image-rendering:pixelated; }
+  #preview-info { font-size:5px; line-height:2.5; }
+  #preview-name { font-size:7px; color:var(--accent); margin-bottom:4px; }
+  #enter-btn {
+    display:block; width:100%; background:var(--accent); border:none;
+    color:white; font-family:'Press Start 2P',monospace; font-size:9px;
+    padding:14px; cursor:pointer; letter-spacing:2px;
+    box-shadow:4px 4px 0 #8b1a28; transition:all 0.1s;
+  }
+  #enter-btn:hover { transform:translate(-2px,-2px); box-shadow:6px 6px 0 #8b1a28; }
+  #enter-btn:active { transform:translate(2px,2px); box-shadow:2px 2px 0 #8b1a28; }
+  #enter-btn:disabled { background:#444; color:#666; box-shadow:none; transform:none; cursor:not-allowed; }
+
+  /* ── INTERACTION TOAST ── */
+  #toast {
+    position:fixed; top:70px; left:50%; transform:translateX(-50%);
+    background:rgba(0,0,0,0.95); border:2px solid var(--yellow);
+    padding:8px 14px; font-size:5px; color:var(--yellow);
+    z-index:200; pointer-events:none; opacity:0; transition:opacity 0.3s;
+    white-space:nowrap;
+  }
+  #toast.show { opacity:1; }
+</style>
+<script>
+  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]);t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}var u=t.createElement("script");u.type="text/javascript",u.crossOrigin="anonymous",u.async=!0,u.src=s.api_host.replace(".i.posthog.com","posthog.com")+"/static/array.js";var l=t.getElementsByTagName("script")[0];l.parentNode.insertBefore(u,l);var r=e;for(void 0!==a?r=e[a]=[]:a="posthog",r.people=r.people||[],r.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},r.people.toString=r.people.toString,o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys getNextSurveyStep onSessionId setPersonPropertiesForFlags".split(" "),n=0;n<o.length;n++)g(r,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+  posthog.init('phc_6UgdkLnMHULzQrgpzIk1xBzSh5q8iVfa7lnxajk8Niq', {
+    api_host: 'https://us.posthog.com',
+    autocapture: true
+  });
+</script>
+</head>
+<body>
+
+<!-- CHARACTER CREATOR -->
+<div id="creator-overlay">
+  <div id="creator-box">
+    <div class="creator-header">
+      CREATE YOUR CHARACTER
+      <div class="creator-subtitle">▸ ENTER THE PIXEL OFFICE ◂</div>
+    </div>
+    <div class="creator-body">
+      <div class="creator-section">
+        <label class="creator-label">▸ YOUR NAME</label>
+        <input class="creator-input" id="char-name" maxlength="8" placeholder="MAX 8 CHARS" oninput="updatePreview()">
+      </div>
+      <div class="creator-section">
+        <label class="creator-label">▸ YOUR ROLE</label>
+        <div class="option-grid" id="role-grid">
+          <div class="opt-btn selected" data-role="Developer 💻" onclick="selectRole(this)">Developer 💻</div>
+          <div class="opt-btn" data-role="Designer 🎨" onclick="selectRole(this)">Designer 🎨</div>
+          <div class="opt-btn" data-role="Researcher 🔭" onclick="selectRole(this)">Researcher 🔭</div>
+          <div class="opt-btn" data-role="Manager 📋" onclick="selectRole(this)">Manager 📋</div>
+        </div>
+      </div>
+      <div class="creator-section">
+        <label class="creator-label">▸ YOUR COLOR</label>
+        <div class="color-grid" id="color-grid">
+          <div class="color-swatch selected" style="background:#4cc9f0" data-color="#4cc9f0" onclick="selectColor(this)"></div>
+          <div class="color-swatch" style="background:#e94560" data-color="#e94560" onclick="selectColor(this)"></div>
+          <div class="color-swatch" style="background:#0f9b58" data-color="#0f9b58" onclick="selectColor(this)"></div>
+          <div class="color-swatch" style="background:#ffd60a" data-color="#ffd60a" onclick="selectColor(this)"></div>
+          <div class="color-swatch" style="background:#7b2d8b" data-color="#7b2d8b" onclick="selectColor(this)"></div>
+          <div class="color-swatch" style="background:#fb8500" data-color="#fb8500" onclick="selectColor(this)"></div>
+          <div class="color-swatch" style="background:#f72585" data-color="#f72585" onclick="selectColor(this)"></div>
+          <div class="color-swatch" style="background:#80ffdb" data-color="#80ffdb" onclick="selectColor(this)"></div>
+          <div class="color-swatch" style="background:#ff6b6b" data-color="#ff6b6b" onclick="selectColor(this)"></div>
+          <div class="color-swatch" style="background:#c77dff" data-color="#c77dff" onclick="selectColor(this)"></div>
+          <div class="color-swatch" style="background:#ffffff" data-color="#ffffff" onclick="selectColor(this)"></div>
+          <div class="color-swatch" style="background:#ffb347" data-color="#ffb347" onclick="selectColor(this)"></div>
+        </div>
+      </div>
+      <div class="creator-section">
+        <label class="creator-label">▸ PREVIEW</label>
+        <div id="preview-area">
+          <svg id="preview-char" width="32" height="48" viewBox="0 0 8 12" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div id="preview-info">
+            <div id="preview-name">PLAYER</div>
+            <div id="preview-role" style="color:var(--blue)">Developer 💻</div>
+            <div style="color:#666;margin-top:6px;font-size:4px">USE ARROW KEYS TO MOVE</div>
+            <div style="color:#666;font-size:4px">SPACE TO INTERACT</div>
+          </div>
+        </div>
+      </div>
+      <button id="enter-btn" onclick="enterOffice()" disabled>[ ENTER OFFICE ]</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <div class="logo">AGENT<span>.</span>WORKS <span style="font-size:6px;color:#666;">// PIXEL OFFICE v1.0</span></div>
+  <div class="stat-pill green" id="stat-active">● 0 ACTIVE</div>
+  <div class="stat-pill" id="stat-tasks">⚡ 0 TASKS TODAY</div>
+  <div class="stat-pill yellow" id="stat-busy">⚙ 0 WORKING</div>
+  <div class="stat-pill" id="stat-player" style="display:none;border-color:var(--accent);color:var(--accent)">👤 YOU</div>
+</div>
+
+<!-- MAP -->
+<div id="mapwrap">
+<div id="map">
+  <div class="floor-grid"></div>
+  <div class="room room-research"><div class="room-label">◈ RESEARCH TEAM</div></div>
+  <div class="room room-data"><div class="room-label">◈ DATA TEAM</div></div>
+  <div class="room room-support"><div class="room-label">◈ SUPPORT TEAM</div></div>
+  <div class="room room-ops"><div class="room-label">◈ OPS TEAM</div></div>
+  <div style="position:absolute;left:512px;top:380px;font-size:5px;color:#444;transform:rotate(-90deg)">— HALLWAY —</div>
+  <div class="plant" style="left:16px;top:16px">🌿</div>
+  <div class="plant" style="left:508px;top:16px">🌱</div>
+  <div class="plant" style="right:16px;top:16px">🌿</div>
+  <div class="plant" style="left:16px;bottom:60px">🪴</div>
+  <div class="plant" style="right:16px;bottom:60px">🌵</div>
+  <div class="plant" style="left:508px;bottom:60px">🌿</div>
+  <div class="deco" style="left:500px;top:200px">🚪</div>
+  <div class="deco" style="left:500px;top:560px">🚪</div>
+  <div class="deco" style="left:200px;top:368px">📋</div>
+  <div class="deco" style="left:800px;top:368px">📋</div>
+  <div id="agents-container"></div>
+  <div id="player-wrap">
+    <div class="player-you-badge">◀ YOU ▶</div>
+    <div class="player-nametag" id="player-nametag" style="border-color:#fff">
+      🧑 PLAYER
+    </div>
+    <svg id="player-sprite" class="player-sprite" width="32" height="48" viewBox="0 0 8 12" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+</div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<!-- TICKER -->
+<div id="ticker"><div id="ticker-inner">Loading...</div></div>
+
+<!-- LEGEND -->
+<div id="legend">
+  <div class="leg-row"><div class="leg-dot" style="background:var(--green)"></div><span>DONE</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:var(--blue)"></div><span>THINKING</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:var(--yellow)"></div><span>WORKING</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:var(--accent)"></div><span>BUSY</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#666"></div><span>IDLE</span></div>
+</div>
+
+<!-- CONTROLS HINT -->
+<div id="controls-hint">
+  <div style="color:var(--accent);margin-bottom:6px">◈ CONTROLS</div>
+  <div><span class="key">↑↓←→</span> MOVE</div>
+  <div><span class="key">SPACE</span> INTERACT</div>
+  <div><span class="key">WASD</span> ALSO MOVE</div>
+</div>
+
+<script>
+// ═══════════════════════ AGENT DATA ═══════════════════════
+const AGENTS = [
+  { id:'nova',   name:'NOVA',   role:'Research Assistant', emoji:'🔭', color:'#4cc9f0', status:'thinking',
+    currentTask:'Analyzing 47 academic papers on transformer architecture scaling laws',
+    capabilities:['Literature synthesis','Hypothesis generation','Citation analysis','Research summarization','Trend forecasting'],
+    recentActivity:[{task:'Summarized NeurIPS 2024 highlights',time:'12m ago',result:'24 papers processed'},{task:'Generated research brief on RAG',time:'1h ago',result:'Brief delivered'}],
+    position:{x:96,y:120}, logs:['[10:42] Fetching arxiv...','[10:43] Parsing PDF batch...','[10:44] Extracting findings...'] },
+  { id:'axiom',  name:'AXIOM',  role:'Data Analyst',        emoji:'📊', color:'#ffd60a', status:'working',
+    currentTask:'Running correlation analysis on Q4 user engagement dataset (2.3M rows)',
+    capabilities:['Statistical analysis','Data visualization','Anomaly detection','Report generation','SQL queries'],
+    recentActivity:[{task:'Built churn prediction model',time:'25m ago',result:'AUC: 0.89'},{task:'Weekly KPI dashboard refresh',time:'2h ago',result:'18 metrics updated'}],
+    position:{x:672,y:120}, logs:['[10:40] Loading dataset...','[10:41] Computing Pearson r...','[10:43] Building heatmap...'] },
+  { id:'vex',    name:'VEX',    role:'Support Agent',       emoji:'💬', color:'#f72585', status:'busy',
+    currentTask:'Handling 3 simultaneous customer tickets: billing, onboarding, API auth',
+    capabilities:['Ticket resolution','FAQ answering','Escalation routing','Sentiment analysis','Response drafting'],
+    recentActivity:[{task:'Resolved 14 tickets in queue',time:'5m ago',result:'Avg CSAT: 4.8★'}],
+    position:{x:96,y:512}, logs:['[10:44] Ticket #4821: resolved','[10:44] Ticket #4822: in progress','[10:45] Ticket #4823: assigned'] },
+  { id:'lumen',  name:'LUMEN',  role:'Content Writer',      emoji:'✍️',  color:'#7b2d8b', status:'done',
+    currentTask:'Blog post draft complete: "10 Ways AI is Reshaping Product Design"',
+    capabilities:['Blog writing','SEO optimization','Social copy','Email campaigns','Tone adaptation'],
+    recentActivity:[{task:'Wrote 3 LinkedIn posts',time:'8m ago',result:'Published ✓'}],
+    position:{x:224,y:120}, logs:['[10:38] Draft v1 complete','[10:39] SEO score: 94/100','[10:40] Submitted for review'] },
+  { id:'cipher', name:'CIPHER', role:'Code Reviewer',       emoji:'⌨️',  color:'#0f9b58', status:'thinking',
+    currentTask:'Reviewing PR #847: auth refactor with 1,200 lines changed',
+    capabilities:['Code review','Bug detection','Security audit','Documentation','Refactor suggestions'],
+    recentActivity:[{task:'Reviewed PR #844: UI components',time:'20m ago',result:'3 issues found'}],
+    position:{x:816,y:120}, logs:['[10:41] Loading diff...','[10:42] Checking auth patterns...','[10:44] Scanning for vulns...'] },
+  { id:'atlas',  name:'ATLAS',  role:'Ops Manager',         emoji:'⚙️',  color:'#fb8500', status:'working',
+    currentTask:'Orchestrating 6 sub-agents for weekly infrastructure health check',
+    capabilities:['Pipeline orchestration','Resource scheduling','Alert routing','Workflow automation','SLA monitoring'],
+    recentActivity:[{task:'Triggered daily backup pipeline',time:'1h ago',result:'Success ✓'}],
+    position:{x:672,y:512}, logs:['[10:40] Sub-agent 1/6: disk OK','[10:41] Sub-agent 2/6: memory OK','[10:43] Sub-agent 3/6: running...'] },
+  { id:'echo',   name:'ECHO',   role:'QA Tester',           emoji:'🔬', color:'#4cc9f0', status:'idle',
+    currentTask:'Waiting for new test suite from CI/CD pipeline',
+    capabilities:['Automated testing','Regression analysis','Edge case generation','Test report writing','Coverage analysis'],
+    recentActivity:[{task:'Ran 847 unit tests on v2.4.1',time:'3h ago',result:'99.8% pass rate'}],
+    position:{x:352,y:512}, logs:['[10:30] Idle, awaiting task...','[10:42] Still waiting...'] },
+  { id:'sol',    name:'SOL',    role:'Scheduler',           emoji:'📅', color:'#ffd60a', status:'done',
+    currentTask:'Successfully scheduled 24 team meetings for next week',
+    capabilities:['Calendar management','Meeting optimization','Conflict resolution','Reminder sending','Time zone handling'],
+    recentActivity:[{task:'Rescheduled 3 conflicting standups',time:'15m ago',result:'All resolved'}],
+    position:{x:816,y:512}, logs:['[10:38] Parsing conflicts','[10:39] Proposing slots','[10:42] All 24 confirmed ✓'] },
+];
+
+// ═══════════════════════ PLAYER STATE ═══════════════════════
+const player = {
+  x: 540, y: 400,  // start in hallway
+  color: '#4cc9f0',
+  name: 'PLAYER',
+  role: 'Developer 💻',
+  emoji: '🧑',
+  moving: false,
+  facingLeft: false,
+  speed: 4,
+};
+
+const keys = {};
+const MAP_W = 1152, MAP_H = 864;
+const PLAYER_W = 16, PLAYER_H = 24;
+
+// ═══════════════════════ CREATOR UI ═══════════════════════
+let creatorColor = '#4cc9f0';
+let creatorRole = 'Developer 💻';
+
+function selectColor(el) {
+  document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+  el.classList.add('selected');
+  creatorColor = el.dataset.color;
+  updatePreview();
+}
+
+function selectRole(el) {
+  document.querySelectorAll('.opt-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  creatorRole = el.dataset.role;
+  updatePreview();
+}
+
+function getCharSVG(color, status, forSVG=false) {
+  const dark = '#0a0a1a';
+  const arms = (status === 'working' || status === 'busy');
+  return `
+    <rect x="1" y="11" width="6" height="1" fill="rgba(0,0,0,0.3)"/>
+    <rect x="2" y="6" width="4" height="4" fill="${color}"/>
+    <rect x="0" y="7" width="2" height="2" fill="${color}" opacity="0.8"/>
+    <rect x="6" y="7" width="2" height="2" fill="${color}" opacity="0.8"/>
+    <rect x="2" y="10" width="2" height="2" fill="${color}" opacity="0.7"/>
+    <rect x="4" y="10" width="2" height="2" fill="${color}" opacity="0.7"/>
+    <rect x="2" y="1" width="4" height="4" fill="${color}" opacity="0.9"/>
+    <rect x="3" y="2" width="1" height="1" fill="${dark}"/>
+    <rect x="5" y="2" width="1" height="1" fill="${dark}"/>
+    <rect x="3" y="4" width="2" height="1" fill="${dark}"/>
+    <rect x="3" y="7" width="2" height="1" fill="${dark}" opacity="0.3"/>
+    ${arms ? `<rect x="1" y="9" width="6" height="1" fill="${color}" opacity="0.15"/>` : ''}
+  `;
+}
+
+function updatePreview() {
+  const nameVal = (document.getElementById('char-name').value || 'PLAYER').toUpperCase().slice(0,8);
+  document.getElementById('preview-name').textContent = nameVal;
+  document.getElementById('preview-role').textContent = creatorRole;
+  const svg = document.getElementById('preview-char');
+  svg.innerHTML = getCharSVG(creatorColor, 'idle');
+  document.getElementById('enter-btn').disabled = !document.getElementById('char-name').value.trim();
+}
+
+function enterOffice() {
+  const nameVal = document.getElementById('char-name').value.trim().toUpperCase().slice(0,8);
+  if (!nameVal) return;
+  player.name = nameVal;
+  player.color = creatorColor;
+  player.role = creatorRole;
+  player.emoji = creatorRole.includes('💻') ? '💻' : creatorRole.includes('🎨') ? '🎨' : creatorRole.includes('🔭') ? '🔭' : '📋';
+  document.getElementById('creator-overlay').style.display = 'none';
+  document.getElementById('stat-player').style.display = '';
+  document.getElementById('stat-player').textContent = `${player.emoji} ${player.name}`;
+  renderPlayerSprite();
+  document.getElementById('player-nametag').textContent = `${player.emoji} ${player.name}`;
+  document.getElementById('player-nametag').style.borderColor = player.color;
+  document.getElementById('player-nametag').style.background = player.color + 'dd';
+  showToast(`Welcome to the office, ${player.name}! Use arrow keys to move.`);
+  startGame();
+}
+
+// ═══════════════════════ PLAYER SPRITE ═══════════════════════
+function renderPlayerSprite() {
+  const svg = document.getElementById('player-sprite');
+  svg.innerHTML = getCharSVG(player.color, 'working');
+  // Add crown/hat to distinguish player
+  svg.innerHTML += `<rect x="2" y="0" width="4" height="1" fill="${player.color}"/>
+    <rect x="3" y="0" width="2" height="1" fill="white" opacity="0.6"/>`;
+}
+
+// ═══════════════════════ GAME LOOP ═══════════════════════
+let gameStarted = false;
+function startGame() {
+  if (gameStarted) return;
+  gameStarted = true;
+  requestAnimationFrame(gameLoop);
+}
+
+function gameLoop() {
+  if (gameStarted) {
+    handleMovement();
+    updatePlayerDOM();
+    checkInteraction();
+  }
+  requestAnimationFrame(gameLoop);
+}
+
+function handleMovement() {
+  let dx = 0, dy = 0;
+  if (keys['ArrowLeft']  || keys['a'] || keys['A']) { dx -= player.speed; player.facingLeft = true; }
+  if (keys['ArrowRight'] || keys['d'] || keys['D']) { dx += player.speed; player.facingLeft = false; }
+  if (keys['ArrowUp']    || keys['w'] || keys['W']) dy -= player.speed;
+  if (keys['ArrowDown']  || keys['s'] || keys['S']) dy += player.speed;
+
+  if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
+
+  player.moving = dx !== 0 || dy !== 0;
+
+  // Clamp
+  const newX = Math.max(20, Math.min(MAP_W - 20, player.x + dx));
+  const newY = Math.max(60, Math.min(MAP_H - 60, player.y + dy));
+  player.x = newX;
+  player.y = newY;
+}
+
+function updatePlayerDOM() {
+  const wrap = document.getElementById('player-wrap');
+  wrap.style.left = player.x + 'px';
+  wrap.style.top = (player.y - 24) + 'px';
+  wrap.className = player.moving
+    ? ('walking' + (player.facingLeft ? ' walking-left' : ''))
+    : '';
+
+  const sprite = document.getElementById('player-sprite');
+  sprite.style.transform = player.facingLeft ? 'scaleX(-1)' : 'scaleX(1)';
+
+  // Camera follow: pan the map to keep player in view
+  const mapwrap = document.getElementById('mapwrap');
+  const vw = mapwrap.clientWidth;
+  const vh = mapwrap.clientHeight;
+  const scaleX = vw / MAP_W;
+  const scaleY = vh / MAP_H;
+  const scale = Math.min(scaleX, scaleY, 1);
+
+  // Target scroll to center player
+  const scaledW = MAP_W * scale;
+  const scaledH = MAP_H * scale;
+  const offsetX = Math.max(0, (vw - scaledW) / 2);
+  const offsetY = Math.max(0, (vh - scaledH) / 2);
+
+  document.getElementById('map').style.transform = `scale(${scale})`;
+  document.getElementById('map').style.marginLeft = offsetX + 'px';
+  document.getElementById('map').style.marginTop = offsetY + 'px';
+}
+
+// ═══════════════════════ INTERACTION ═══════════════════════
+let lastInteract = 0;
+let nearAgent = null;
+
+function checkInteraction() {
+  const INTERACT_DIST = 80;
+  nearAgent = null;
+  for (const agent of AGENTS) {
+    const dx = player.x - agent.position.x;
+    const dy = player.y - agent.position.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist < INTERACT_DIST) {
+      nearAgent = agent;
+      break;
+    }
+  }
+}
+
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (e.key === ' ' && nearAgent) {
+    e.preventDefault();
+    const now = Date.now();
+    if (now - lastInteract > 1000) {
+      lastInteract = now;
+      handleInteraction(nearAgent);
+    }
+  }
+  // Prevent page scroll with arrows
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+});
+
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+function handleInteraction(agent) {
+  spawnEmoji(agent.id, ['👋','💬','⚡','🤝'][Math.floor(Math.random()*4)]);
+  showToast(`${agent.emoji} ${agent.name} says: "${getAgentQuip(agent)}"`, 3000);
+}
+
+const QUIPS = {
+  nova: ["Got some papers for me to read? 📚", "My citation graph is looking wild today!", "I'm knee-deep in transformers rn."],
+  axiom: ["My p-values are looking spicy 🌶️", "Your data, analyzed. Come back at 3.", "Correlation ≠ causation... probably."],
+  vex: ["Hold on, 3 tickets open! 😅", "CSAT is at 4.8, no thanks to ticket #4823.", "Need support? I'm the support 😎"],
+  lumen: ["Fresh off the keyboard — new blog post!", "Need copy? I write fast AND pretty.", "SEO score: 94. You're welcome. ✍️"],
+  cipher: ["Found a SQL injection. Fun times. 🔍", "Your PR needs 7 more tests.", "Code smell detected in the hallway."],
+  atlas: ["Pipeline 14 is chuggin' along ⚙️", "All agents nominal. Mostly.", "SLA breach in 3... 2... just kidding."],
+  echo: ["Still waiting on that test suite 🔬", "99.8% pass rate. The 0.2% haunts me.", "I found an edge case in your coffee order."],
+  sol: ["You have 3 conflicts next Tuesday 📅", "I optimized your entire week. You're welcome.", "Time zones are a myth I disprove daily."],
+};
+
+function getAgentQuip(agent) {
+  const q = QUIPS[agent.id] || ['Hello there! 👋'];
+  return q[Math.floor(Math.random() * q.length)];
+}
+
+// ═══════════════════════ TOAST ═══════════════════════
+let toastTimeout;
+function showToast(msg, duration=2500) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => el.classList.remove('show'), duration);
+}
+
+// ═══════════════════════ FLOATING EMOJI ═══════════════════════
+function spawnEmoji(agentId, emoji) {
+  const agent = AGENTS.find(a => a.id === agentId);
+  if (!agent) return;
+  const el = document.createElement('div');
+  el.className = 'float-emoji';
+  el.textContent = emoji;
+  el.style.left = (agent.position.x + Math.random()*40-20) + 'px';
+  el.style.top = (agent.position.y - 20) + 'px';
+  document.getElementById('map').appendChild(el);
+  setTimeout(() => el.remove(), 2000);
+}
+
+// ═══════════════════════ AGENTS RENDER ═══════════════════════
+let tasksToday = 74;
+function getBubble(agent) {
+  if (agent.status === 'idle') return '';
+  const labels = {
+    thinking: `<span class="think-dot">●</span><span class="think-dot">●</span><span class="think-dot">●</span>`,
+    working: `<span class="gear">⚙</span> Running...`,
+    done: `✅ Done`, busy: `🔴 Busy`,
+  };
+  return `<div class="bubble ${agent.status}">${labels[agent.status]||''}</div>`;
+}
+
+function renderAgents() {
+  const container = document.getElementById('agents-container');
+  container.innerHTML = '';
+  AGENTS.forEach(agent => {
+    const desk = document.createElement('div');
+    desk.className = `desk${agent.status !== 'idle' ? ' on' : ''}`;
+    desk.style.left = (agent.position.x - 40) + 'px';
+    desk.style.top = (agent.position.y + 24) + 'px';
+    container.appendChild(desk);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'agent-wrap';
+    wrap.id = `agent-${agent.id}`;
+    wrap.style.left = agent.position.x + 'px';
+    wrap.style.top = agent.position.y + 'px';
+    wrap.innerHTML = `
+      ${getBubble(agent)}
+      <div class="nametag" style="border-color:${agent.color}">
+        ${agent.emoji} ${agent.name}
+        <div class="status-dot dot-${agent.status}"></div>
+      </div>
+      <svg class="agent-sprite" width="32" height="48" viewBox="0 0 8 12" xmlns="http://www.w3.org/2000/svg">
+        ${getCharSVG(agent.color, agent.status)}
+      </svg>
+    `;
+    container.appendChild(wrap);
+  });
+
+  // Ensure player stays on top
+  const playerWrap = document.getElementById('player-wrap');
+  container.parentElement.appendChild(playerWrap);
+
+  updateStats();
+}
+
+function updateStats() {
+  const active = AGENTS.filter(a => a.status !== 'idle').length;
+  const busy = AGENTS.filter(a => a.status === 'working' || a.status === 'busy').length;
+  document.getElementById('stat-active').textContent = `● ${active} ACTIVE`;
+  document.getElementById('stat-tasks').textContent = `⚡ ${tasksToday} TASKS TODAY`;
+  document.getElementById('stat-busy').textContent = `⚙ ${busy} WORKING`;
+}
+
+// ═══════════════════════ SIMULATION ═══════════════════════
+const STATUS_TASKS = {
+  nova:   ['Searching arxiv for new papers...','Synthesizing research findings','Generating hypothesis tree'],
+  axiom:  ['Running regression model','Building scatter plot matrix','Querying data warehouse'],
+  vex:    ['Answering ticket #4831','Drafting escalation email','Searching knowledge base'],
+  lumen:  ['Writing product blog post','Optimizing SEO metadata','Drafting social captions'],
+  cipher: ['Reviewing PR #852','Running static analysis','Checking for SQL injection'],
+  atlas:  ['Running pipeline #14','Monitoring agent health','Routing failed job'],
+  echo:   ['Running test suite #88','Checking edge cases','Generating coverage report'],
+  sol:    ['Finding open time slots','Sending calendar invites','Resolving meeting conflicts'],
+};
+const COMPLETION_EMOJIS = ['🎉','✅','⚡','🚀','💫','🏆'];
+
+function tickAgents() {
+  AGENTS.forEach(agent => {
+    if (Math.random() > 0.7) {
+      const old = agent.status;
+      const pool = ['thinking','working','busy','done','idle'];
+      agent.status = pool[Math.floor(Math.random()*pool.length)];
+      const tasks = STATUS_TASKS[agent.id];
+      if (tasks) agent.currentTask = tasks[Math.floor(Math.random()*tasks.length)];
+      if (agent.status === 'done' && old !== 'done') {
+        tasksToday++;
+        setTimeout(() => spawnEmoji(agent.id, COMPLETION_EMOJIS[Math.floor(Math.random()*COMPLETION_EMOJIS.length)]), 100);
+      }
+    }
+  });
+  renderAgents();
+}
+
+function updateTicker() {
+  const events = AGENTS.map(a => `${a.emoji} ${a.name}: ${a.currentTask}`);
+  events.push(`📊 TASKS TODAY: ${tasksToday}`, `🌐 WORKSPACE: ONLINE`, `⚡ ALL SYSTEMS NOMINAL`);
+  if (gameStarted) events.push(`👤 ${player.name} IS IN THE OFFICE`);
+  document.getElementById('ticker-inner').textContent = events.join('   ·   ');
+}
+
+// ═══════════════════════ INIT ═══════════════════════
+updatePreview();
+renderAgents();
+updateTicker();
+setInterval(() => { tickAgents(); updateTicker(); }, 3000);
+
+// Proximity indicator — show SPACE hint when near agent
+setInterval(() => {
+  if (!gameStarted) return;
+  if (nearAgent) showToast(`▸ Press SPACE to talk to ${nearAgent.emoji} ${nearAgent.name}`);
+}, 800);
+</script>
+</body>
+</html>
